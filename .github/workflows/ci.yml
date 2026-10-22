@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Select Xcode 27.1 for iPhone Duo readiness
         run: bash scripts/select-xcode.sh
@@ -40,7 +40,7 @@ jobs:
 
       - name: Upload diagnostic build logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: platform-build-logs
           path: Artifacts/build/*.log

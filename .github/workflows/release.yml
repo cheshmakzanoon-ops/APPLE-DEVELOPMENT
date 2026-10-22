@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Check out trusted main branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Select Xcode 27.1
         run: bash scripts/select-xcode.sh
