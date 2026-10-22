@@ -1,0 +1,57 @@
+name: Upload Apple build to App Store Connect
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Native platform to archive and upload
+        required: true
+        type: choice
+        options:
+          - ios
+          - macos
+          - watchos
+          - tvos
+          - visionos
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-store-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Upload ${{ inputs.platform }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 90
+    environment: app-store
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+
+    steps:
+      - name: Check out trusted main branch
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 27.1
+        run: bash scripts/select-xcode.sh
+
+      - name: Install project generator
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Run shared tests
+        run: swift test --package-path Packages/SharedCore
+
+      - name: Sign, archive, and upload selected platform
+        env:
+          RELEASE_PLATFORM: ${{ inputs.platform }}
+        run: bash scripts/release.sh
+

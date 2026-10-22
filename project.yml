@@ -1,0 +1,97 @@
+name: ApplePlatformTemplate
+
+options:
+  bundleIdPrefix: dev.example
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+    watchOS: "10.0"
+    tvOS: "17.0"
+    visionOS: "1.0"
+
+packages:
+  SharedCore:
+    path: Packages/SharedCore
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    GENERATE_INFOPLIST_FILE: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  iOSApp:
+    type: application
+    platform: iOS
+    sources:
+      - Apps/Shared
+      - Apps/iOS
+    dependencies:
+      - package: SharedCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.example.appleplatformtemplate.ios
+        INFOPLIST_KEY_CFBundleDisplayName: Apple Template
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+
+  MacApp:
+    type: application
+    platform: macOS
+    sources:
+      - Apps/Shared
+      - Apps/macOS
+    dependencies:
+      - package: SharedCore
+    entitlements:
+      path: Config/MacApp.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.example.appleplatformtemplate.macos
+        INFOPLIST_KEY_CFBundleDisplayName: Apple Template
+        ENABLE_HARDENED_RUNTIME: YES
+
+  WatchApp:
+    type: application
+    platform: watchOS
+    sources:
+      - Apps/Shared
+      - Apps/watchOS
+    dependencies:
+      - package: SharedCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.example.appleplatformtemplate.watchos
+        INFOPLIST_KEY_CFBundleDisplayName: Apple Template
+        INFOPLIST_KEY_WKApplication: YES
+        INFOPLIST_KEY_WKWatchOnly: YES
+
+  TVApp:
+    type: application
+    platform: tvOS
+    sources:
+      - Apps/Shared
+      - Apps/tvOS
+    dependencies:
+      - package: SharedCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.example.appleplatformtemplate.tvos
+        INFOPLIST_KEY_CFBundleDisplayName: Apple Template
+
+  VisionApp:
+    type: application
+    platform: visionOS
+    sources:
+      - Apps/Shared
+      - Apps/visionOS
+    dependencies:
+      - package: SharedCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.example.appleplatformtemplate.visionos
+        INFOPLIST_KEY_CFBundleDisplayName: Apple Template
+

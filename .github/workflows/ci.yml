@@ -1,0 +1,49 @@
+name: Apple platform CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build all five OS targets
+    runs-on: xcode-27
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 27.1 for iPhone Duo readiness
+        run: bash scripts/select-xcode.sh
+
+      - name: Install project generator
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Test shared Swift package
+        run: swift test --package-path Packages/SharedCore
+
+      - name: Compile every platform (unsigned)
+        run: bash scripts/build-all.sh
+
+      - name: Upload diagnostic build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-build-logs
+          path: Artifacts/build/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
