@@ -162,4 +162,179 @@ final class OddmouthGameTests: XCTestCase {
             XCTAssertEqual($0 as? MouthGameError, .unfinishedRound)
         }
     }
+    // MARK: - Cross-examination: two genuinely independent secret ballots
+
+    private func enterNominations(_ game: inout MouthGame) {
+        for _ in game.players { XCTAssertTrue(game.advanceReveal()) }
+        for _ in game.players { XCTAssertTrue(game.advanceClue()) }
+        XCTAssertEqual(game.round?.stage, .nominating)
+    }
+
+    func testNominationsSelectHotSeatAndFinalBallotCanReverseTheRoom() throws {
+        var game = try MouthGame(players: players(5))
+        var random = FixedRandom()
+        try game.startRound(category: .food, includeBlank: false,
+                            crossExamination: true, using: &random)
+        enterNominations(&game)
+        let ids = game.players.map(\.id)
+        XCTAssertThrowsError(try game.castVote(from: ids[0], for: ids[1])) {
+            XCTAssertEqual($0 as? MouthGameError, .wrongStage)
+        }
+        for i in ids.indices {
+            let target = i == 0 ? ids[1] : ids[0]
+            try game.nominate(from: ids[i], for: target)
+        }
+        XCTAssertEqual(game.round?.stage, .interrogation)
+        XCTAssertEqual(game.round?.nomineeID, ids[0])
+        XCTAssertEqual(game.round?.nominationCount(for: ids[0]), 4)
+        XCTAssertFalse(game.round?.nominationWasTie ?? true)
+        XCTAssertThrowsError(try game.nominate(from: ids[0], for: ids[2]))
+        XCTAssertTrue(game.finishInterrogation())
+        XCTAssertFalse(game.finishInterrogation())
+        XCTAssertEqual(game.round?.stage, .voting)
+        XCTAssertTrue(game.round?.votes.isEmpty == true)
+        for i in ids.indices {
+            // Final decisions deliberately differ from the initial majority.
+            try game.castVote(from: ids[i], for: ids[(i + 1) % ids.count])
+        }
+        XCTAssertEqual(game.round?.stage, .results)
+        XCTAssertEqual(game.round?.nominations.count, 5)
+        XCTAssertEqual(game.round?.votes.count, 5)
+        XCTAssertEqual(game.round?.changedTheirMindCount, 3)
+        XCTAssertTrue(game.round?.isTie == true)
+        XCTAssertNil(game.round?.eliminatedID)
+    }
+
+    func testNominationRejectsSelfVoteAndRepeatWithoutLeakingAChoice() throws {
+        var game = try MouthGame(players: players(3))
+        var random = FixedRandom()
+        try game.startRound(category: .all, includeBlank: false,
+                            crossExamination: true, using: &random)
+        enterNominations(&game)
+        let ids = game.players.map(\.id)
+        XCTAssertThrowsError(try game.nominate(from: ids[0], for: ids[0])) {
+            XCTAssertEqual($0 as? MouthGameError, .invalidVote)
+        }
+        try game.nominate(from: ids[0], for: ids[1])
+        XCTAssertThrowsError(try game.nominate(from: ids[0], for: ids[2])) {
+            XCTAssertEqual($0 as? MouthGameError, .invalidVote)
+        }
+        XCTAssertEqual(game.round?.nominations.count, 1)
+        XCTAssertNil(game.round?.nomineeID)
+        XCTAssertEqual(game.round?.stage, .nominating)
+    }
+
+    func testTiedNominationsUseRotatingClueOrderToSelectOneHotSeat() throws {
+        var game = try MouthGame(players: players(4))
+        var random = FixedRandom()
+        try game.startRound(category: .everyday, includeBlank: false,
+                            crossExamination: true, using: &random)
+        enterNominations(&game)
+        let ids = game.players.map(\.id)
+        for index in ids.indices {
+            try game.nominate(from: ids[index], for: ids[(index + 1) % ids.count])
+        }
+        XCTAssertTrue(game.round?.nominationWasTie == true)
+        XCTAssertEqual(game.round?.nomineeID, game.round?.clueOrder.first)
+        XCTAssertEqual(game.round?.stage, .interrogation)
+    }
+
+    func testClassicalFlowDoesNotAccidentallyEnterInterrogation() throws {
+        var game = try started(12, blank: true)
+        enterVoting(&game)
+        XCTAssertTrue(game.round?.nominations.isEmpty == true)
+        XCTAssertNil(game.round?.nomineeID)
+        XCTAssertFalse(game.finishInterrogation())
+    }
+
+    func testSavedSessionRoundTripsWithPrivateRolesAndActiveStage() throws {
+        var game = try MouthGame(players: players(5))
+        var random = FixedRandom()
+        try game.startRound(category: .sideways, includeBlank: true,
+                            crossExamination: true, using: &random)
+        for _ in game.players { XCTAssertTrue(game.advanceReveal()) }
+        XCTAssertTrue(game.advanceClue())
+        let data = try JSONEncoder().encode(game)
+        let restored = try JSONDecoder().decode(MouthGame.self, from: data)
+        XCTAssertEqual(restored.roundNumber, 1)
+        XCTAssertEqual(restored.round?.stage, .clues)
+        XCTAssertEqual(restored.round?.clueIndex, 1)
+        XCTAssertEqual(restored.players, game.players)
+        XCTAssertEqual(restored.scores, game.scores)
+        for person in game.players {
+            XCTAssertEqual(restored.round?.privateWord(for: person.id),
+                           game.round?.privateWord(for: person.id))
+        }
+    }
+
+    func testCustomDeckUsesOnlyHousePairsAndAvoidsBackToBackCards() throws {
+        let pack = try MouthHousePack(name: "Inside Jokes", source: """
+            Streetcar | Cable car
+            Trombone | Tuba
+            Lighthouse | Watchtower
+            """)
+        var game = try MouthGame(players: players(3))
+        var random = FixedRandom()
+        try game.startRound(category: .all, includeBlank: false,
+                            customPairs: pack.gamePairs, using: &random)
+        let first = try XCTUnwrap(game.round?.wordPair.id)
+        XCTAssertTrue(Set(pack.gamePairs.map(\.id)).contains(first))
+        enterVoting(&game)
+        let ids = game.players.map(\.id)
+        for index in ids.indices {
+            try game.castVote(from: ids[index], for: ids[(index + 1) % ids.count])
+        }
+        try game.startRound(category: .all, includeBlank: false,
+                            customPairs: pack.gamePairs, using: &random)
+        let second = try XCTUnwrap(game.round?.wordPair.id)
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue(Set(pack.gamePairs.map(\.id)).contains(second))
+    }
+
+    func testHousePackInputValidationAndEditorRoundTrip() throws {
+        let pack = try MouthHousePack(name: " A Strange Night ", source: """
+
+            Guitar | Banjo
+            Jazz club | Concert hall
+            Pillow | Cushion
+
+            """)
+        XCTAssertEqual(pack.name, "A Strange Night")
+        XCTAssertEqual(pack.pairs.count, 3)
+        XCTAssertEqual(pack.gamePairs.count, 3)
+        let restored = try JSONDecoder().decode(
+            MouthHousePack.self, from: JSONEncoder().encode(pack)
+        )
+        XCTAssertEqual(restored, pack)
+        XCTAssertEqual(restored.editorText.components(separatedBy: "\n").count, 3)
+        XCTAssertThrowsError(try MouthHousePack(name: "X", source: pack.editorText)) {
+            XCTAssertEqual($0 as? MouthHouseError, .invalidName)
+        }
+        XCTAssertThrowsError(try MouthHousePack(name: "Duplicates", source: """
+            Door | Window
+            Window | Door
+            Sky | Sea
+            """)) {
+            XCTAssertEqual($0 as? MouthHouseError, .duplicatePair(2))
+        }
+        XCTAssertThrowsError(try MouthHousePack(name: "Not Enough", source: "Blue | Red")) {
+            XCTAssertEqual($0 as? MouthHouseError, .insufficientPairs)
+        }
+        XCTAssertThrowsError(try MouthHousePack(name: "Bad Line", source: """
+            Chair | Sofa
+            no delimiter
+            Bird | Fish
+            """)) {
+            XCTAssertEqual($0 as? MouthHouseError, .invalidLine(2))
+        }
+    }
+
+    func testAllCrossExaminationPromptsAreComplete() {
+        XCTAssertEqual(MouthChallenge.allCases.count, 12)
+        for card in MouthChallenge.allCases {
+            XCTAssertFalse(card.headline.isEmpty)
+            XCTAssertFalse(card.instruction.isEmpty)
+        }
+    }
+
 }

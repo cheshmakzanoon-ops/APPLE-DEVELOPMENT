@@ -7,11 +7,26 @@ struct OddmouthRootView: View {
     @State private var names = ["", "", "", ""]
     @State private var category: MouthCategory = .all
     @State private var includeBlank = false
+    @State private var crossExamination = true
+    @State private var clueDuration = 120
+    @State private var selectedHouseID: UUID?
+    @State private var housePacks = MouthHouseLibrary.load()
+    @State private var isEditingDeck = false
+    @State private var editingDeckID: UUID?
+    @State private var draftDeckName = ""
+    @State private var draftDeckSource = ""
+    @State private var deckErrorMessage: String?
+    @State private var showDeleteConfirmation = false
+    @State private var savedSession: MouthSessionSnapshot?
+    @State private var hasCheckedResume = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var game: MouthGame?
     @State private var isWordShowing = false
     @State private var didPeek = false
     @State private var selectedVote: UUID?
-    @State private var secondsRemaining = 90
+    @State private var selectedNomination: UUID?
+    @State private var isBallotReady = false
+    @State private var secondsRemaining = 120
     @State private var errorMessage: String?
 
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -41,9 +56,25 @@ struct OddmouthRootView: View {
         .foregroundStyle(MouthColors.ink)
         .tint(MouthColors.ink)
         .onReceive(clock) { _ in
-            if game?.round?.stage == .clues && secondsRemaining > 0 {
-                secondsRemaining -= 1
+            guard scenePhase == .active,
+                  (game?.round?.stage == .clues || game?.round?.stage == .interrogation),
+                  secondsRemaining > 0 else { return }
+            secondsRemaining -= 1
+            if secondsRemaining % 10 == 0 { persistSession() }
+        }
+        .onAppear(perform: checkForSavedSession)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                // Never leave a private role or an unfinished ballot on the app switcher.
+                isWordShowing = false
+                isBallotReady = false
+                selectedVote = nil
+                selectedNomination = nil
+                persistSession()
             }
+        }
+        .sheet(isPresented: $isEditingDeck) {
+            houseDeckEditor
         }
         .alert(
             "Hold up.",
@@ -64,7 +95,9 @@ struct OddmouthRootView: View {
             switch round.stage {
             case .handoff: handoffScreen(round)
             case .clues: clueScreen(round)
-            case .voting: votingScreen(round)
+            case .nominating: ballotScreen(round, nomination: true)
+            case .interrogation: interrogationScreen(round)
+            case .voting: ballotScreen(round, nomination: false)
             case .results: resultScreen(round)
             }
         } else {
@@ -81,6 +114,25 @@ struct OddmouthRootView: View {
                 title: "Someone has the wrong word.",
                 subtitle: "Talk your way through the room. Catch the strange clue. Try not to get caught giving it."
             )
+
+            if let savedSession {
+                MouthPanel(color: MouthColors.blue) {
+                    MouthTag(text: "UNFINISHED BUSINESS", fill: MouthColors.paper)
+                    Text("Your last table is still here.")
+                        .font(.system(size: 23, weight: .black, design: .rounded))
+                    Text("Round \(savedSession.game.roundNumber) • \(savedSession.game.players.count) players. Continue from the exact moment you left.")
+                        .font(.system(size: 14, weight: .medium))
+                    Button(action: resumeSavedSession) {
+                        Label("RESUME THE TABLE", systemImage: "arrow.uturn.forward")
+                    }
+                    .buttonStyle(MouthButtonStyle(fill: MouthColors.lime))
+                    Button("DISCARD THE OLD SESSION") {
+                        MouthSessionStore.clear()
+                        self.savedSession = nil
+                    }
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                }
+            }
 
             MouthPanel(color: MouthColors.lime) {
                 HStack(alignment: .top, spacing: 15) {
@@ -148,18 +200,47 @@ struct OddmouthRootView: View {
                     .font(.system(size: 16, weight: .black, design: .rounded))
                 Menu {
                     ForEach(MouthCategory.allCases) { pack in
-                        Button(pack.rawValue) { category = pack }
+                        Button(pack.rawValue) {
+                            category = pack
+                            selectedHouseID = nil
+                        }
+                    }
+                    if !housePacks.isEmpty {
+                        Divider()
+                        ForEach(housePacks) { pack in
+                            Button("HOUSE / \(pack.name)") { selectedHouseID = pack.id }
+                        }
                     }
                 } label: {
                     HStack {
                         Image(systemName: "square.stack.3d.up.fill")
-                        Text(category.rawValue)
+                        Text(selectedHousePack.map { "HOUSE / \($0.name)" } ?? category.rawValue)
                         Spacer()
                         Image(systemName: "chevron.up.chevron.down")
                     }
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .padding(15)
                     .background(MouthColors.paper, in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                if let house = selectedHousePack {
+                    Text("\(house.pairs.count) pairs written by your table. Stored on this device.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(MouthColors.muted)
+                }
+
+                HStack {
+                    Button {
+                        showNewHouseDeck()
+                    } label: {
+                        Label("MAKE A HOUSE DECK", systemImage: "square.and.pencil")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                    }
+                    Spacer()
+                    if let house = selectedHousePack {
+                        Button("EDIT THIS DECK") { showEditHouseDeck(house) }
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                    }
                 }
 
                 Toggle(isOn: $includeBlank) {
@@ -179,12 +260,46 @@ struct OddmouthRootView: View {
                         .font(.caption)
                         .foregroundStyle(MouthColors.muted)
                 }
+
+                Divider()
+                Toggle(isOn: $crossExamination) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("THE HOT SEAT")
+                            .font(.system(size: 14, weight: .black, design: .rounded))
+                        Text("Private nominations → one timed defense → a fresh final vote.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(MouthColors.muted)
+                    }
+                }
+                .tint(MouthColors.red)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("CLUE TIMER")
+                            .font(.system(size: 14, weight: .black, design: .rounded))
+                        Text("Shared by everyone giving clues.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(MouthColors.muted)
+                    }
+                    Spacer()
+                    Menu {
+                        ForEach([90, 120, 180, 240], id: \.self) { seconds in
+                            Button("\(seconds / 60):\(seconds % 60 == 0 ? "00" : "30")") {
+                                clueDuration = seconds
+                            }
+                        }
+                    } label: {
+                        MouthTag(text: "\(clueDuration)s", fill: MouthColors.lime)
+                    }
+                }
             }
 
             Button(action: startGame) {
                 Label("DEAL THE WORDS", systemImage: "arrow.right")
             }
             .buttonStyle(MouthButtonStyle(fill: MouthColors.red))
+            .disabled(savedSession != nil)
+            .opacity(savedSession == nil ? 1 : 0.45)
 
             Text("Offline from the first card. No account, chat, tracking, or internet connection.")
                 .font(.system(size: 12, weight: .medium))
@@ -329,7 +444,9 @@ struct OddmouthRootView: View {
 
             Button(action: advanceClue) {
                 Label(
-                    round.clueIndex + 1 == round.clueOrder.count ? "START PRIVATE VOTING" : "NEXT SPEAKER",
+                    round.clueIndex + 1 == round.clueOrder.count
+                        ? (round.crossExamination ? "START SECRET NOMINATIONS" : "START PRIVATE VOTING")
+                        : "NEXT SPEAKER",
                     systemImage: "arrow.right"
                 )
             }
@@ -337,57 +454,137 @@ struct OddmouthRootView: View {
         }
     }
 
-    // MARK: - Hidden ballots
+    // MARK: - The two private ballots
 
-    private func votingScreen(_ round: MouthRound) -> some View {
-        let voter = game!.players[round.votes.count]
+    private func ballotScreen(_ round: MouthRound, nomination: Bool) -> some View {
+        let ballotCount = nomination ? round.nominations.count : round.votes.count
+        let voter = game!.players[ballotCount]
         let candidates = game!.players.filter { $0.id != voter.id }
+        let selection = nomination ? selectedNomination : selectedVote
 
         return VStack(alignment: .leading, spacing: 22) {
             MouthSectionHeading(
-                kicker: "SECRET BALLOT \(round.votes.count + 1) OF \(game!.players.count)",
-                title: "\(voter.name), who's off?",
-                subtitle: "Hand the phone to this voter. Choose the person with the strangest clue. Your choice stays hidden."
+                kicker: nomination
+                    ? "SECRET NOMINATION \(ballotCount + 1) OF \(game!.players.count)"
+                    : "FINAL BALLOT \(ballotCount + 1) OF \(game!.players.count)",
+                title: isBallotReady ? "\(voter.name), who's off?" : "Only \(voter.name) should look.",
+                subtitle: nomination
+                    ? "The first ballot chooses who must defend their clue. Nobody sees individual nominations."
+                    : "You've heard the defense. You can change your mind. This vote decides the round."
             )
 
-            MouthPanel {
-                Text("CAST ONE VOTE")
-                    .font(.system(size: 13, weight: .black, design: .monospaced))
-                ForEach(candidates) { candidate in
+            if !isBallotReady {
+                MouthPanel(color: MouthColors.lime) {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.system(size: 39, weight: .black))
+                    Text("PASS THE PHONE")
+                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                    Text("Ready, \(voter.name)?")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                    Text("Everyone else, look away. Your choices will be hidden as soon as you lock them.")
+                        .font(.system(size: 15, weight: .medium))
                     Button {
-                        selectedVote = candidate.id
+                        isBallotReady = true
                     } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: selectedVote == candidate.id
-                                  ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(MouthColors.red)
-                                .font(.title3)
-                            Text(candidate.name)
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundStyle(MouthColors.ink)
-                            Spacer()
-                        }
-                        .padding(15)
-                        .background(
-                            selectedVote == candidate.id ? MouthColors.lime : MouthColors.paper,
-                            in: RoundedRectangle(cornerRadius: 14)
-                        )
+                        Label("I'M \(voter.name.uppercased())", systemImage: "lock.open.fill")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedVote == candidate.id ? [.isSelected] : [])
+                    .buttonStyle(MouthButtonStyle(fill: MouthColors.pale))
                 }
+            } else {
+                MouthPanel {
+                    Text(nomination ? "WHO'S GOING IN THE HOT SEAT?" : "MAKE YOUR FINAL CALL")
+                        .font(.system(size: 13, weight: .black, design: .monospaced))
+                    ForEach(candidates) { candidate in
+                        Button {
+                            if nomination {
+                                selectedNomination = candidate.id
+                            } else {
+                                selectedVote = candidate.id
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: selection == candidate.id
+                                      ? "largecircle.fill.circle" : "circle")
+                                    .foregroundStyle(MouthColors.red)
+                                    .font(.title3)
+                                Text(candidate.name)
+                                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                                    .foregroundStyle(MouthColors.ink)
+                                Spacer()
+                            }
+                            .padding(15)
+                            .background(
+                                selection == candidate.id ? MouthColors.lime : MouthColors.paper,
+                                in: RoundedRectangle(cornerRadius: 14)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == candidate.id ? [.isSelected] : [])
+                    }
+                }
+
+                Button {
+                    if nomination { lockNomination() } else { lockVote() }
+                } label: {
+                    Label(nomination ? "LOCK MY NOMINATION" : "LOCK MY FINAL VOTE",
+                          systemImage: "lock.fill")
+                }
+                .buttonStyle(MouthButtonStyle(fill: MouthColors.red))
+                .disabled(selection == nil)
+                .opacity(selection == nil ? 0.45 : 1)
+
+                Text("No self-votes. Your selection cannot be changed after locking. Only the totals appear at the end.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(MouthColors.muted)
+            }
+        }
+    }
+
+    // MARK: - The hot seat
+
+    private func interrogationScreen(_ round: MouthRound) -> some View {
+        let name = round.nomineeID.flatMap { game!.player(for: $0)?.name } ?? "Someone"
+
+        return VStack(alignment: .leading, spacing: 22) {
+            MouthSectionHeading(
+                kicker: "THE HOT SEAT / 30 SECONDS",
+                title: "\(name), explain yourself.",
+                subtitle: "The room privately picked one person to question. Then everybody gets a completely fresh vote."
+            )
+
+            MouthPanel(color: MouthColors.red) {
+                MouthTag(text: "THE FOLLOW-UP", fill: MouthColors.paper)
+                Text(round.challenge.headline)
+                    .font(.system(size: 31, weight: .black, design: .rounded))
+                    .tracking(-1)
+                Text(round.challenge.instruction)
+                    .font(.system(size: 18, weight: .bold))
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button(action: lockVote) {
-                Label("LOCK MY VOTE", systemImage: "lock.fill")
+            MouthPanel {
+                HStack(spacing: 13) {
+                    Image(systemName: "timer")
+                        .font(.system(size: 30, weight: .bold))
+                    Text(timeLabel)
+                        .font(.system(size: 38, weight: .black, design: .monospaced))
+                        .foregroundStyle(secondsRemaining == 0 ? MouthColors.red : MouthColors.ink)
+                    Spacer()
+                    MouthTag(text: "DEFEND", fill: MouthColors.lime)
+                }
+                if round.nominationWasTie {
+                    Text("The nominations were tied. This round's speaking order broke the tie.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MouthColors.muted)
+                }
+                Text("Give the speaker their moment. No names or vote totals are revealed until the end.")
+                    .font(.system(size: 14, weight: .medium))
             }
-            .buttonStyle(MouthButtonStyle(fill: MouthColors.red))
-            .disabled(selectedVote == nil)
-            .opacity(selectedVote == nil ? 0.45 : 1)
 
-            Text("No player can vote for themselves. Votes aren't displayed until everyone is done.")
-                .font(.system(size: 13))
-                .foregroundStyle(MouthColors.muted)
+            Button(action: finishInterrogation) {
+                Label("START THE FINAL BALLOT", systemImage: "arrow.right")
+            }
+            .buttonStyle(MouthButtonStyle(fill: MouthColors.lime))
         }
     }
 
@@ -437,6 +634,44 @@ struct OddmouthRootView: View {
                 }
             }
 
+            if round.crossExamination {
+                MouthPanel(color: MouthColors.blue) {
+                    MouthTag(text: "THE SECOND OPINION", fill: MouthColors.paper)
+                    Text("\(round.changedTheirMindCount) changed their mind.")
+                        .font(.system(size: 26, weight: .black, design: .rounded))
+                        .minimumScaleFactor(0.7)
+                    Text("Initial nominations vs. final votes. We only show totals, never who voted for whom.")
+                        .font(.system(size: 13, weight: .medium))
+                    HStack {
+                        Text("PLAYER")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("FIRST")
+                            .frame(width: 48)
+                        Text("FINAL")
+                            .frame(width: 48)
+                    }
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    ForEach(game!.players) { person in
+                        HStack {
+                            Text(person.name)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                            if round.nomineeID == person.id {
+                                Image(systemName: "flame.fill")
+                                    .accessibilityLabel("Hot seat")
+                            }
+                            Spacer()
+                            Text("\(round.nominationCount(for: person.id))")
+                                .frame(width: 48)
+                            Text("\(round.voteCount(for: person.id))")
+                                .frame(width: 48)
+                        }
+                        .font(.system(size: 15, weight: .black, design: .monospaced))
+                        Divider().overlay(MouthColors.ink.opacity(0.12))
+                    }
+                }
+            }
+
             MouthPanel(color: MouthColors.paper) {
                 Text("THE SCOREBOARD")
                     .font(.system(size: 13, weight: .black, design: .monospaced))
@@ -469,6 +704,10 @@ struct OddmouthRootView: View {
                 isWordShowing = false
                 didPeek = false
                 selectedVote = nil
+                selectedNomination = nil
+                isBallotReady = false
+                savedSession = nil
+                MouthSessionStore.clear()
             } label: {
                 Text("BACK TO THE TABLE SETUP")
                     .font(.system(size: 12, weight: .black, design: .monospaced))
@@ -505,9 +744,191 @@ struct OddmouthRootView: View {
         return String(format: "%01d:%02d", minutes, seconds)
     }
 
+    // MARK: - House decks
+
+    private var selectedHousePack: MouthHousePack? {
+        housePacks.first { $0.id == selectedHouseID }
+    }
+
+    private var houseDeckEditor: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    MouthSectionHeading(
+                        kicker: "WRITTEN BY YOUR TABLE",
+                        title: editingDeckID == nil ? "Make a scene." : "Rewrite the rules.",
+                        subtitle: "Your own private word pairs. Make them about friends, local places, hobbies, or any in-joke."
+                    )
+
+                    MouthPanel {
+                        Text("DECK NAME")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                        TextField("e.g. Our Friday Nights", text: $draftDeckName)
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .padding(12)
+                            .background(MouthColors.paper, in: RoundedRectangle(cornerRadius: 12))
+                        Text("ONE PAIR PER LINE")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                        Text("Write the ordinary word first, then |, then the nearby odd one.")
+                            .font(.system(size: 14, weight: .medium))
+                        TextEditor(text: $draftDeckSource)
+                            .font(.system(size: 16, weight: .medium, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 250)
+                            .padding(10)
+                            .background(MouthColors.paper, in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityLabel("Word pairs, one per line, separated by a vertical bar")
+                        Text("For example:\nVinyl | Cassette\nJazz club | Concert hall\nBirthday | Anniversary\n\n3–120 pairs, up to 40 characters per phrase.")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(MouthColors.muted)
+                    }
+
+                    Button(action: saveHouseDeck) {
+                        Label(editingDeckID == nil ? "SAVE MY DECK" : "SAVE CHANGES",
+                              systemImage: "square.and.arrow.down.fill")
+                    }
+                    .buttonStyle(MouthButtonStyle(fill: MouthColors.lime))
+
+                    if editingDeckID != nil {
+                        Button(role: .destructive) {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Text("DELETE THIS HOUSE DECK")
+                                .font(.system(size: 12, weight: .black, design: .monospaced))
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+
+                    Text("Stored only on this device. No upload or tracking. Use your phone's normal backups to keep these decks.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(MouthColors.muted)
+                }
+                .padding(24)
+                .frame(maxWidth: 650)
+                .frame(maxWidth: .infinity)
+            }
+            .background(MouthColors.paper.ignoresSafeArea())
+            .foregroundStyle(MouthColors.ink)
+            .navigationTitle(editingDeckID == nil ? "New house deck" : "Edit house deck")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { isEditingDeck = false }
+                }
+            }
+            .confirmationDialog(
+                "Delete this deck? This can't be undone.",
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete deck", role: .destructive) {
+                    guard let editingDeckID,
+                          let pack = housePacks.first(where: { $0.id == editingDeckID }) else { return }
+                    deleteHouseDeck(pack)
+                }
+            }
+            .alert(
+                "Check this deck.",
+                isPresented: Binding(
+                    get: { deckErrorMessage != nil },
+                    set: { if !$0 { deckErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { deckErrorMessage = nil }
+            } message: {
+                Text(deckErrorMessage ?? "")
+            }
+        }
+    }
+
+    private func showNewHouseDeck() {
+        editingDeckID = nil
+        draftDeckName = ""
+        draftDeckSource = ""
+        isEditingDeck = true
+    }
+
+    private func showEditHouseDeck(_ pack: MouthHousePack) {
+        editingDeckID = pack.id
+        draftDeckName = pack.name
+        draftDeckSource = pack.editorText
+        isEditingDeck = true
+    }
+
+    private func saveHouseDeck() {
+        do {
+            let pack = try MouthHousePack(id: editingDeckID ?? UUID(),
+                                          name: draftDeckName, source: draftDeckSource)
+            var proposed = housePacks
+            if let index = proposed.firstIndex(where: { $0.id == pack.id }) {
+                proposed[index] = pack
+            } else {
+                proposed.append(pack)
+            }
+            try MouthHouseLibrary.save(proposed)
+            housePacks = proposed
+            selectedHouseID = pack.id
+            isEditingDeck = false
+        } catch {
+            deckErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteHouseDeck(_ pack: MouthHousePack) {
+        do {
+            let proposed = housePacks.filter { $0.id != pack.id }
+            try MouthHouseLibrary.save(proposed)
+            housePacks = proposed
+            if selectedHouseID == pack.id { selectedHouseID = nil }
+            isEditingDeck = false
+        } catch {
+            deckErrorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Crash-safe, local-only match recovery
+
+    private func checkForSavedSession() {
+        guard !hasCheckedResume else { return }
+        hasCheckedResume = true
+        savedSession = MouthSessionStore.load()
+    }
+
+    private func resumeSavedSession() {
+        guard let snapshot = savedSession else { return }
+        game = snapshot.game
+        category = snapshot.category
+        includeBlank = snapshot.includeBlank
+        crossExamination = snapshot.crossExamination
+        clueDuration = snapshot.clueDuration
+        secondsRemaining = snapshot.secondsRemaining
+        selectedHouseID = snapshot.selectedHouseID
+        isWordShowing = false
+        didPeek = false
+        selectedVote = nil
+        selectedNomination = nil
+        isBallotReady = false
+        savedSession = nil
+    }
+
+    private func persistSession() {
+        guard let game else { return }
+        let snapshot = MouthSessionSnapshot(
+            game: game, category: category, includeBlank: includeBlank,
+            crossExamination: crossExamination, clueDuration: clueDuration,
+            secondsRemaining: secondsRemaining, selectedHouseID: selectedHouseID
+        )
+        do {
+            try MouthSessionStore.save(snapshot)
+        } catch {
+            // Session persistence is best-effort; never interrupt an active party.
+        }
+    }
+
     // MARK: - Session commands
 
     private func startGame() {
+        guard savedSession == nil else { return }
         let players = names.enumerated().map { index, raw -> MouthPlayer in
             let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             return MouthPlayer(name: cleaned.isEmpty ? "Player \(index + 1)" : cleaned)
@@ -516,43 +937,80 @@ struct OddmouthRootView: View {
             var newGame = try MouthGame(players: players)
             try newGame.startRound(
                 category: category,
-                includeBlank: includeBlank && players.count >= 5
+                includeBlank: includeBlank && players.count >= 5,
+                crossExamination: crossExamination,
+                customPairs: selectedHousePack?.gamePairs
             )
             game = newGame
             isWordShowing = false
             didPeek = false
+            isBallotReady = false
             selectedVote = nil
-            secondsRemaining = 90
+            selectedNomination = nil
+            secondsRemaining = clueDuration
+            persistSession()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     private func advanceReveal() {
-        guard var session = game else { return }
-        guard session.advanceReveal() else { return }
+        guard var session = game, session.advanceReveal() else { return }
         game = session
         isWordShowing = false
         didPeek = false
-        if session.round?.stage == .clues { secondsRemaining = 90 }
+        if session.round?.stage == .clues { secondsRemaining = clueDuration }
+        persistSession()
     }
 
     private func advanceClue() {
-        guard var session = game else { return }
-        guard session.advanceClue() else { return }
+        guard var session = game, session.advanceClue() else { return }
         game = session
+        selectedNomination = nil
+        isBallotReady = false
+        persistSession()
+    }
+
+    private func lockNomination() {
+        guard var session = game,
+              let round = session.round,
+              round.stage == .nominating,
+              isBallotReady,
+              let target = selectedNomination else { return }
+        let voter = session.players[round.nominations.count]
+        do {
+            try session.nominate(from: voter.id, for: target)
+            game = session
+            selectedNomination = nil
+            isBallotReady = false
+            if session.round?.stage == .interrogation { secondsRemaining = 30 }
+            persistSession()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func finishInterrogation() {
+        guard var session = game, session.finishInterrogation() else { return }
+        game = session
+        selectedVote = nil
+        isBallotReady = false
+        persistSession()
     }
 
     private func lockVote() {
         guard var session = game,
               let round = session.round,
               round.stage == .voting,
+              isBallotReady,
               let target = selectedVote else { return }
         let voter = session.players[round.votes.count]
         do {
             try session.castVote(from: voter.id, for: target)
             game = session
             selectedVote = nil
+            isBallotReady = false
+            persistSession()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -563,13 +1021,18 @@ struct OddmouthRootView: View {
         do {
             try session.startRound(
                 category: category,
-                includeBlank: includeBlank && session.players.count >= 5
+                includeBlank: includeBlank && session.players.count >= 5,
+                crossExamination: crossExamination,
+                customPairs: selectedHousePack?.gamePairs
             )
             game = session
-            secondsRemaining = 90
+            secondsRemaining = clueDuration
             isWordShowing = false
             didPeek = false
             selectedVote = nil
+            selectedNomination = nil
+            isBallotReady = false
+            persistSession()
         } catch {
             errorMessage = error.localizedDescription
         }

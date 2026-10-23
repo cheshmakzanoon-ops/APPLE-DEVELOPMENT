@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Models
 
 /// Pure game rules. No network, account, location, or UI framework is required.
-public struct MouthPlayer: Identifiable, Hashable, Sendable {
+public struct MouthPlayer: Identifiable, Hashable, Codable, Sendable {
     public let id: UUID
     public let name: String
 
@@ -13,7 +13,7 @@ public struct MouthPlayer: Identifiable, Hashable, Sendable {
     }
 }
 
-public enum MouthCategory: String, CaseIterable, Identifiable, Sendable {
+public enum MouthCategory: String, CaseIterable, Identifiable, Codable, Sendable {
     case all = "All packs"
     case everyday = "Everyday"
     case afterHours = "After hours"
@@ -23,7 +23,7 @@ public enum MouthCategory: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
 }
 
-public struct MouthWordPair: Hashable, Sendable, Identifiable {
+public struct MouthWordPair: Hashable, Codable, Sendable, Identifiable {
     public let common: String
     public let alternate: String
     public let category: MouthCategory
@@ -37,21 +37,23 @@ public struct MouthWordPair: Hashable, Sendable, Identifiable {
     }
 }
 
-public enum MouthRole: String, Sendable {
+public enum MouthRole: String, Codable, Sendable {
     case regular
     case oddmouth
     case blank
 }
 
-public enum MouthStage: Sendable, Equatable {
+public enum MouthStage: String, Codable, Sendable, Equatable {
     case handoff
     case clues
+    case nominating
+    case interrogation
     case voting
     case results
 }
 
 /// Everyone must interpret the same unusual instruction while hiding what they know.
-public enum MouthPressure: String, CaseIterable, Sendable {
+public enum MouthPressure: String, CaseIterable, Codable, Sendable {
     case threeWords
     case aMemory
     case aQuestion
@@ -91,6 +93,57 @@ public enum MouthPressure: String, CaseIterable, Sendable {
     }
 }
 
+/// The hot-seat player answers one concrete follow-up before everybody votes again.
+/// Each challenge is independent of the word pair, so the defense cannot leak a card.
+public enum MouthChallenge: String, CaseIterable, Codable, Sendable {
+    case giveAnExample
+    case explainTheClue
+    case oppositeDay
+    case oneSentence
+    case oddlyPersonal
+    case drawTheLine
+    case ordinaryTuesday
+    case showYourWork
+    case worstPossible
+    case nowConvinceUs
+    case justAFeeling
+    case noBacktracking
+
+    public var headline: String {
+        switch self {
+        case .giveAnExample: "ONE EXAMPLE"
+        case .explainTheClue: "EXPLAIN YOURSELF"
+        case .oppositeDay: "OPPOSITE DAY"
+        case .oneSentence: "ONE SENTENCE"
+        case .oddlyPersonal: "MAKE IT PERSONAL"
+        case .drawTheLine: "DRAW THE LINE"
+        case .ordinaryTuesday: "JUST A TUESDAY"
+        case .showYourWork: "SHOW YOUR WORK"
+        case .worstPossible: "WORST CASE"
+        case .nowConvinceUs: "CONVINCE THE ROOM"
+        case .justAFeeling: "GUT FEELING"
+        case .noBacktracking: "NO TAKEBACKS"
+        }
+    }
+
+    public var instruction: String {
+        switch self {
+        case .giveAnExample: "Give one specific example that fits your original clue."
+        case .explainTheClue: "Explain the link between your clue and your secret word."
+        case .oppositeDay: "Describe what your word definitely isn't."
+        case .oneSentence: "You get one sentence. Make it count."
+        case .oddlyPersonal: "Turn your clue into a very personal story."
+        case .drawTheLine: "Explain what people usually confuse your word with."
+        case .ordinaryTuesday: "Put your word into the most ordinary day imaginable."
+        case .showYourWork: "Walk us through why you chose that exact clue."
+        case .worstPossible: "Describe the worst possible version of your word."
+        case .nowConvinceUs: "You've been nominated. Tell us why we are wrong."
+        case .justAFeeling: "Explain your word using only a mood or feeling."
+        case .noBacktracking: "Repeat your clue, then add one detail. No changing it."
+        }
+    }
+}
+
 public enum MouthGameError: Error, Equatable, LocalizedError {
     case playerCount
     case duplicateNames
@@ -111,14 +164,19 @@ public enum MouthGameError: Error, Equatable, LocalizedError {
     }
 }
 
-public struct MouthRound: Sendable {
+public struct MouthRound: Codable, Sendable {
     public let wordPair: MouthWordPair
     public let pressure: MouthPressure
     public let roles: [UUID: MouthRole]
     public let clueOrder: [UUID]
+    public let crossExamination: Bool
+    public let challenge: MouthChallenge
     public private(set) var stage: MouthStage = .handoff
     public private(set) var revealIndex: Int = 0
     public private(set) var clueIndex: Int = 0
+    public private(set) var nominations: [UUID: UUID] = [:]
+    public private(set) var nomineeID: UUID?
+    public private(set) var nominationWasTie = false
     public private(set) var votes: [UUID: UUID] = [:]
     public private(set) var eliminatedID: UUID?
     public private(set) var isTie = false
@@ -140,12 +198,23 @@ public struct MouthRound: Sendable {
         votes.values.filter { $0 == playerID }.count
     }
 
+    public func nominationCount(for playerID: UUID) -> Int {
+        nominations.values.filter { $0 == playerID }.count
+    }
+
+    public var changedTheirMindCount: Int {
+        votes.filter { nominations[$0.key] != nil && nominations[$0.key] != $0.value }.count
+    }
+
     fileprivate init(pair: MouthWordPair, pressure: MouthPressure,
-                     roles: [UUID: MouthRole], clueOrder: [UUID]) {
+                     roles: [UUID: MouthRole], clueOrder: [UUID],
+                     crossExamination: Bool, challenge: MouthChallenge) {
         self.wordPair = pair
         self.pressure = pressure
         self.roles = roles
         self.clueOrder = clueOrder
+        self.crossExamination = crossExamination
+        self.challenge = challenge
     }
 
     fileprivate mutating func nextReveal(totalPlayers: Int) {
@@ -155,7 +224,25 @@ public struct MouthRound: Sendable {
 
     fileprivate mutating func nextClue() {
         clueIndex += 1
-        if clueIndex >= clueOrder.count { stage = .voting }
+        if clueIndex >= clueOrder.count {
+            stage = crossExamination ? .nominating : .voting
+        }
+    }
+
+    fileprivate mutating func recordNomination(from voter: UUID, for target: UUID, totalPlayers: Int) {
+        nominations[voter] = target
+        guard nominations.count == totalPlayers else { return }
+        let tallies = Dictionary(grouping: nominations.values, by: { $0 }).mapValues(\.count)
+        let highest = tallies.values.max() ?? 0
+        let leaders = Set(tallies.filter { $0.value == highest }.map(\.key))
+        // Rotation order makes simultaneous nominations reproducible and fair over rounds.
+        nomineeID = clueOrder.first { leaders.contains($0) }
+        nominationWasTie = leaders.count > 1
+        stage = .interrogation
+    }
+
+    fileprivate mutating func finishInterrogation() {
+        stage = .voting
     }
 
     fileprivate mutating func recordVote(from voter: UUID, for target: UUID) {
@@ -173,7 +260,7 @@ public struct MouthRound: Sendable {
 }
 
 /// A local, pass-the-phone session. Only the app view ever reveals private words.
-public struct MouthGame: Sendable {
+public struct MouthGame: Codable, Sendable {
     public let players: [MouthPlayer]
     public private(set) var scores: [UUID: Int]
     public private(set) var round: MouthRound?
@@ -204,23 +291,34 @@ public struct MouthGame: Sendable {
         players.first { $0.id == id }
     }
 
-    public mutating func startRound(category: MouthCategory, includeBlank: Bool = false) throws {
+    public mutating func startRound(
+        category: MouthCategory,
+        includeBlank: Bool = false,
+        crossExamination: Bool = false,
+        customPairs: [MouthWordPair]? = nil
+    ) throws {
         var generator = SystemRandomNumberGenerator()
-        try startRound(category: category, includeBlank: includeBlank, using: &generator)
+        try startRound(category: category, includeBlank: includeBlank,
+                       crossExamination: crossExamination, customPairs: customPairs,
+                       using: &generator)
     }
 
     /// Inject the RNG in tests for reproducible secret assignments.
     public mutating func startRound<R: RandomNumberGenerator>(
         category: MouthCategory,
         includeBlank: Bool,
+        crossExamination: Bool = false,
+        customPairs: [MouthWordPair]? = nil,
         using generator: inout R
     ) throws {
         if let round, round.stage != .results { throw MouthGameError.unfinishedRound }
-        let candidates = MouthDeck.entries(for: category).filter { $0.id != previousPairID }
+        let candidates = (customPairs ?? MouthDeck.entries(for: category))
+            .filter { $0.id != previousPairID }
         guard let pair = candidates.randomElement(using: &generator) else {
             throw MouthGameError.emptyDeck
         }
-        guard let pressure = MouthPressure.allCases.randomElement(using: &generator) else {
+        guard let pressure = MouthPressure.allCases.randomElement(using: &generator),
+              let challenge = MouthChallenge.allCases.randomElement(using: &generator) else {
             throw MouthGameError.emptyDeck
         }
         let shuffled = players.shuffled(using: &generator)
@@ -234,7 +332,9 @@ public struct MouthGame: Sendable {
         let rotation = roundNumber % players.count
         let clueOrder = Array(players[rotation...].map(\.id))
             + Array(players[..<rotation].map(\.id))
-        round = MouthRound(pair: pair, pressure: pressure, roles: roles, clueOrder: clueOrder)
+        round = MouthRound(pair: pair, pressure: pressure, roles: roles,
+                           clueOrder: clueOrder, crossExamination: crossExamination,
+                           challenge: challenge)
         previousPairID = pair.id
         roundNumber += 1
     }
@@ -251,6 +351,30 @@ public struct MouthGame: Sendable {
     public mutating func advanceClue() -> Bool {
         guard var active = round, active.stage == .clues else { return false }
         active.nextClue()
+        round = active
+        return true
+    }
+
+    /// The first, private ballot chooses who must defend. It never affects scoring.
+    public mutating func nominate(from voter: UUID, for target: UUID) throws {
+        guard var active = round, active.stage == .nominating else {
+            throw MouthGameError.wrongStage
+        }
+        guard voter != target,
+              players.contains(where: { $0.id == voter }),
+              players.contains(where: { $0.id == target }),
+              active.nominations[voter] == nil else {
+            throw MouthGameError.invalidVote
+        }
+        active.recordNomination(from: voter, for: target, totalPlayers: players.count)
+        round = active
+    }
+
+    @discardableResult
+    public mutating func finishInterrogation() -> Bool {
+        guard var active = round, active.stage == .interrogation,
+              active.nomineeID != nil else { return false }
+        active.finishInterrogation()
         round = active
         return true
     }
