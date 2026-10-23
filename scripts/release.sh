@@ -13,8 +13,8 @@ for required in APPLE_TEAM_ID APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_
   fi
 done
 
-if grep -q 'dev.example.appleplatformtemplate' project.yml; then
-  echo "Replace ALL example PRODUCT_BUNDLE_IDENTIFIER values in project.yml before releasing." >&2
+if [[ "$RELEASE_PLATFORM" != "oddmouth" ]] && grep -q 'dev.example.appleplatformtemplate' project.yml; then
+  echo "Replace example PRODUCT_BUNDLE_IDENTIFIER values in project.yml before releasing template targets." >&2
   exit 1
 fi
 
@@ -24,6 +24,7 @@ case "$RELEASE_PLATFORM" in
   watchos) scheme=WatchApp; destination='generic/platform=watchOS' ;;
   tvos) scheme=TVApp; destination='generic/platform=tvOS' ;;
   visionos) scheme=VisionApp; destination='generic/platform=visionOS' ;;
+  oddmouth) scheme=Oddmouth; destination='generic/platform=iOS' ;;
   *) echo "Unsupported platform: $RELEASE_PLATFORM" >&2; exit 1 ;;
 esac
 

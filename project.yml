@@ -95,3 +95,18 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.example.appleplatformtemplate.visionos
         INFOPLIST_KEY_CFBundleDisplayName: Apple Template
 
+
+  # Project 01 — independent native iOS app, preserving all five template targets.
+  Oddmouth:
+    type: application
+    platform: iOS
+    sources:
+      - Projects/01-Oddmouth/iOS
+    dependencies:
+      - package: SharedCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cheshmakzanoon.oddmouth
+        INFOPLIST_KEY_CFBundleDisplayName: Oddmouth
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO

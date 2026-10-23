@@ -5,7 +5,7 @@ flowchart TD
     A[Git push / Pull request] --> B[macOS Xcode 27 runner]
     B --> C[XcodeGen project]
     C --> D[SharedCore unit tests]
-    D --> E[Five unsigned builds]
+    D --> E[Six unsigned builds]
     E --> F[Build logs]
     G[Manual main branch release] --> H[Protected app-store environment]
     H --> I[Archive and sign]
@@ -21,6 +21,7 @@ flowchart TD
 | `WatchApp` | watchOS | Standalone Watch application |
 | `TVApp` | tvOS | Television-native view |
 | `VisionApp` | visionOS | Spatial window; immersive spaces are future work |
+| `Oddmouth` | iOS/iPadOS | Project 01, original offline party game |
 
 `SharedCore` has **no** SwiftUI dependency and can be tested independently; `Apps/Shared` contains the small SwiftUI UI surface compiled into each app. The iOS entry point adds `GeometryReader` plus a policy from `SharedCore` so wider Duo/iPad layouts do not stretch phone UI blindly.
 
@@ -48,3 +49,12 @@ A generated Xcode project tends to cause noisy conflicts and would require a Mac
 ## Release limitations
 
 An automated upload is not a successful App Review submission. Before publishing, each app still needs its icon, store metadata, privacy declarations, screenshots, agreements, signing configuration, and appropriate functional/hardware testing.
+
+
+## Independent application projects
+
+**Project 01 — Oddmouth** lives in Projects/01-Oddmouth/iOS with its own
+@main entry point and XcodeGen target, while reusing Foundation-only
+SharedCore models, game engine, and deck. The other five targets are unchanged.
+The CI job builds all six unsigned targets; the protected release workflow
+offers an explicit oddmouth choice and still never auto-uploads from a push.

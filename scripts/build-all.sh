@@ -15,6 +15,7 @@ builds=(
   'WatchApp|generic/platform=watchOS Simulator'
   'TVApp|generic/platform=tvOS Simulator'
   'VisionApp|generic/platform=visionOS Simulator'
+  'Oddmouth|generic/platform=iOS Simulator'
 )
 
 for build in "${builds[@]}"; do

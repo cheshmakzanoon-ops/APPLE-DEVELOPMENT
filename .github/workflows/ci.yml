@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Build all five OS targets
+    name: Build five platforms + Oddmouth
     runs-on: xcode-27
     timeout-minutes: 90
 
@@ -35,7 +35,7 @@ jobs:
       - name: Test shared Swift package
         run: swift test --package-path Packages/SharedCore
 
-      - name: Compile every platform (unsigned)
+      - name: Compile all platforms and Oddmouth (unsigned)
         run: bash scripts/build-all.sh
 
       - name: Upload diagnostic build logs

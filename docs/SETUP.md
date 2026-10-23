@@ -101,3 +101,16 @@ The workflow uses `xcodebuild archive` plus `-exportArchive` with `destination=u
 - [Apple's App Store Connect upload documentation](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/)
 - [iPhone Duo preparation](https://developer.apple.com/news/?id=kkphp5qo)
 
+
+
+## Project 01 — Oddmouth
+
+To build the new iOS party-game scheme, use the ordinary Apple platform CI;
+it now includes Oddmouth alongside the original five platform targets.
+For a future protected App Store upload, choose the **oddmouth** release option.
+
+Confirm ownership/registration of **com.cheshmakzanoon.oddmouth** in your Apple
+team before using the sample bundle ID. The original five starter targets still
+have distinct placeholder IDs. Oddmouth also needs a production icon,
+screenshots, real-device/TestFlight verification, and the other launch work
+in [Projects/01-Oddmouth/RELEASE_CHECKLIST.md](../Projects/01-Oddmouth/RELEASE_CHECKLIST.md).

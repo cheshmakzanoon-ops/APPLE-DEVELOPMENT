@@ -13,6 +13,7 @@ on:
           - watchos
           - tvos
           - visionos
+          - oddmouth
 
 permissions:
   contents: read
