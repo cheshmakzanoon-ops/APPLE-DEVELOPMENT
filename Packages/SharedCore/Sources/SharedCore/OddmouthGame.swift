@@ -130,9 +130,9 @@ public struct MouthRound: Sendable {
     public func privateWord(for playerID: UUID) -> String? {
         guard let role = roles[playerID] else { return nil }
         switch role {
-        case .regular: wordPair.common
-        case .oddmouth: wordPair.alternate
-        case .blank: nil
+        case .regular: return wordPair.common
+        case .oddmouth: return wordPair.alternate
+        case .blank: return nil
         }
     }
 
