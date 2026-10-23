@@ -2,14 +2,17 @@
 
 ## Engineering
 
-- [ ] GitHub Actions SharedCore tests pass on the macOS runner.
-- [ ] Unsigned Oddmouth iOS Simulator build succeeds.
-- [ ] Smoke-test 3, 5, 8, and 12 players across consecutive rounds.
+- [x] GitHub Actions SharedCore tests pass on the macOS runner. ([CI run 39904296644](https://github.com/cheshmakzanoon-ops/APPLE-DEVELOPMENT/actions/runs/39904296644))
+- [x] Unsigned Oddmouth iOS Simulator build succeeds. ([CI run 39904296644](https://github.com/cheshmakzanoon-ops/APPLE-DEVELOPMENT/actions/runs/39904296644))
+- [ ] Physically smoke-test 3, 5, 8, and 12 players across consecutive rounds.
 - [ ] Test oddmouth-only and optional blank-card sessions.
 - [ ] Confirm no private words remain displayed during phone handoff.
 - [ ] Test ties, correct detection, all players voting, and scores.
 - [ ] Check Dynamic Type, Reduce Motion, VoiceOver, and minimum touch sizes.
-- [ ] Test interruption/background/foreground, rotation, and iPad width.
+- [ ] On a physical device, test interruption/background/foreground, rotation, and iPad width.
+- [ ] On a physical device, test Hot Seat nominations, defense timing, changed votes, and ballot privacy.
+- [ ] On a physical device, share a deck through the system sheet, import it, and verify saved edits.
+- [ ] On a physical device, terminate/relaunch mid-round and verify concealed private words and accurate recovery.
 - [ ] Test fold/unfold transitions on iPhone Duo hardware or Device Hub.
 - [ ] Conduct at least 20 sessions with real groups and fix confusing steps.
 
@@ -33,4 +36,4 @@
 - [ ] Invite testers and resolve crashes and onboarding issues.
 - [ ] Submit explicitly for App Review when release candidate is ready.
 
-No boxes are checked until there is recorded evidence.
+Checked items above have the linked CI evidence. Simulator compilation and unit tests do not prove device UX or App Store readiness.
