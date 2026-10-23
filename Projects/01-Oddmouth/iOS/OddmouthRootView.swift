@@ -12,6 +12,9 @@ struct OddmouthRootView: View {
     @State private var selectedHouseID: UUID?
     @State private var housePacks = MouthHouseLibrary.load()
     @State private var isEditingDeck = false
+    @State private var isImportingDeck = false
+    @State private var importDeckCode = ""
+    @State private var importErrorMessage: String?
     @State private var editingDeckID: UUID?
     @State private var draftDeckName = ""
     @State private var draftDeckSource = ""
@@ -75,6 +78,9 @@ struct OddmouthRootView: View {
         }
         .sheet(isPresented: $isEditingDeck) {
             houseDeckEditor
+        }
+        .sheet(isPresented: $isImportingDeck) {
+            houseDeckImporter
         }
         .alert(
             "Hold up.",
@@ -233,12 +239,24 @@ struct OddmouthRootView: View {
                     Button {
                         showNewHouseDeck()
                     } label: {
-                        Label("MAKE A HOUSE DECK", systemImage: "square.and.pencil")
+                        Label("MAKE A DECK", systemImage: "square.and.pencil")
                             .font(.system(size: 12, weight: .black, design: .rounded))
                     }
                     Spacer()
-                    if let house = selectedHousePack {
-                        Button("EDIT THIS DECK") { showEditHouseDeck(house) }
+                    Button {
+                        importDeckCode = ""
+                        isImportingDeck = true
+                    } label: {
+                        Label("IMPORT CODE", systemImage: "square.and.arrow.down")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                    }
+                }
+                if let house = selectedHousePack {
+                    Button {
+                        showEditHouseDeck(house)
+                    } label: {
+                        Label("EDIT / SHARE \(house.name.uppercased())",
+                              systemImage: "square.and.arrow.up")
                             .font(.system(size: 12, weight: .black, design: .rounded))
                     }
                 }
@@ -789,6 +807,18 @@ struct OddmouthRootView: View {
                     }
                     .buttonStyle(MouthButtonStyle(fill: MouthColors.lime))
 
+                    if let editingDeckID,
+                       let deck = housePacks.first(where: { $0.id == editingDeckID }),
+                       let code = try? MouthHouseTransfer.export(deck) {
+                        ShareLink(item: code) {
+                            Label("SHARE SAVED VERSION", systemImage: "square.and.arrow.up.fill")
+                        }
+                        .buttonStyle(MouthButtonStyle(fill: MouthColors.blue))
+                        Text("Save changes before sharing. The portable code works in Messages, AirDrop, or any app you choose.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(MouthColors.muted)
+                    }
+
                     if editingDeckID != nil {
                         Button(role: .destructive) {
                             showDeleteConfirmation = true
@@ -838,6 +868,78 @@ struct OddmouthRootView: View {
             } message: {
                 Text(deckErrorMessage ?? "")
             }
+        }
+    }
+
+    private var houseDeckImporter: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 23) {
+                    MouthSectionHeading(
+                        kicker: "THE DECK CHANGES HANDS",
+                        title: "Someone brought new words.",
+                        subtitle: "Paste the code a friend shared. It imports a new copy of their house deck, which you can edit freely."
+                    )
+
+                    MouthPanel(color: MouthColors.lime) {
+                        Text("PASTE AN ODDMOUTH DECK CODE")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                        TextEditor(text: $importDeckCode)
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 180)
+                            .padding(10)
+                            .background(MouthColors.paper, in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityLabel("Shared house deck code")
+                        Text("Codes begin with ODD1:. Nothing is uploaded. Imported decks stay on this iPhone or iPad.")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+
+                    Button(action: importHouseDeck) {
+                        Label("ADD DECK TO THE TABLE", systemImage: "square.and.arrow.down.fill")
+                    }
+                    .buttonStyle(MouthButtonStyle(fill: MouthColors.red))
+                    .disabled(importDeckCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(24)
+                .frame(maxWidth: 650)
+                .frame(maxWidth: .infinity)
+            }
+            .background(MouthColors.paper.ignoresSafeArea())
+            .foregroundStyle(MouthColors.ink)
+            .navigationTitle("Import house deck")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { isImportingDeck = false }
+                }
+            }
+            .alert(
+                "Couldn't read that deck.",
+                isPresented: Binding(
+                    get: { importErrorMessage != nil },
+                    set: { if !$0 { importErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { importErrorMessage = nil }
+            } message: {
+                Text(importErrorMessage ?? "")
+            }
+        }
+    }
+
+    private func importHouseDeck() {
+        do {
+            let deck = try MouthHouseTransfer.importCode(importDeckCode)
+            var updated = housePacks
+            updated.append(deck)
+            try MouthHouseLibrary.save(updated)
+            housePacks = updated
+            selectedHouseID = deck.id
+            isImportingDeck = false
+            importDeckCode = ""
+        } catch {
+            importErrorMessage = error.localizedDescription
         }
     }
 

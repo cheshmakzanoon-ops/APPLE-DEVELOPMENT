@@ -337,4 +337,37 @@ final class OddmouthGameTests: XCTestCase {
         }
     }
 
+    // MARK: - Offline deck exchange
+
+    func testSharedHouseCodeRoundTripsWithoutReusingIdentity() throws {
+        let pack = try MouthHousePack(name: "Basement Radio", source: """
+            Drum machine | Metronome
+            Guitar amp | Speaker cabinet
+            Mixtape | Playlist
+            """)
+        let exported = try MouthHouseTransfer.export(pack)
+        XCTAssertTrue(exported.hasPrefix("ODD1:"))
+        XCTAssertFalse(exported.contains("+"))
+        XCTAssertFalse(exported.contains("/"))
+        let imported = try MouthHouseTransfer.importCode("  " + exported + "\n")
+        XCTAssertEqual(imported.name, pack.name)
+        XCTAssertEqual(imported.pairs, pack.pairs)
+        XCTAssertNotEqual(imported.id, pack.id)
+        XCTAssertEqual(imported.gamePairs, pack.gamePairs)
+    }
+
+    func testRejectsMalformedAndOversizeHouseCodes() throws {
+        XCTAssertThrowsError(try MouthHouseTransfer.importCode("bad")) {
+            XCTAssertEqual($0 as? MouthTransferError, .unsupportedFormat)
+        }
+        XCTAssertThrowsError(try MouthHouseTransfer.importCode("ODD1:AAAA")) {
+            XCTAssertEqual($0 as? MouthTransferError, .damagedCode)
+        }
+        XCTAssertThrowsError(
+            try MouthHouseTransfer.importCode("ODD1:" + String(repeating: "A", count: 64_000))
+        ) {
+            XCTAssertEqual($0 as? MouthTransferError, .tooLong)
+        }
+    }
+
 }

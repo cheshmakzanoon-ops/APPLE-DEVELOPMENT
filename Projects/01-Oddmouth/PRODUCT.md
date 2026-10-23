@@ -43,7 +43,8 @@ independent trademark and App Store-title check before registration/release.
 
 Playable offline core now includes four authored packs, 9 clue-pressure cards,
 12 cross-examination challenges, independent secret nomination/final ballots,
-local house-deck editor, flexible clue timer, and resumable matches. No backend.
+local house-deck editor, offline exchangeable deck codes, flexible clue timer,
+and resumable matches. No backend.
 Still gather 20 group play sessions, tune confusion/stall points, and test
 VoiceOver, private-card handoffs, timer pacing and the hot seat on real devices.
 A successful compile is not evidence of an enjoyable party.
@@ -59,7 +60,8 @@ products and restore-purchase behavior. Never block already-purchased content.
 - **Hot Seat (implemented):** a privately nominated player gets 30 seconds to defend, followed by independent final ballots.
 - **Second thoughts:** one unanimous table veto per match, logged visibly.
 - **Duet:** two opponents must respond to one jointly chosen pressure card.
-- **House rules (editor implemented):** editable local custom packs; nearby-device transfer remains future work.
+- **House rules (editor implemented):** editable local custom packs; codes can be shared explicitly through the system share sheet;
+  nearby-device live game synchronization remains future work.
 
 ## Ethical and App Store boundaries
 

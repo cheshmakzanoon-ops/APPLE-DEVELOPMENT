@@ -65,7 +65,8 @@ goes into the background; the clock pauses. No account or cloud sync is required
 | Projects/01-Oddmouth/iOS/PrivacyInfo.xcprivacy | Current no-tracking/no-collected-data manifest |
 | Packages/SharedCore/Sources/SharedCore/OddmouthGame.swift | Foundation-only, deterministic, testable game rules |
 | Packages/SharedCore/Sources/SharedCore/OddmouthDeck.swift | Offline original word pairs
-| Packages/SharedCore/Sources/SharedCore/OddmouthHousePack.swift | House-deck validation and local persistence |
+| Packages/SharedCore/Sources/SharedCore/OddmouthHousePack.swift | House-deck validation and local persistence
+| Packages/SharedCore/Sources/SharedCore/OddmouthHouseTransfer.swift | Offline export/import codec with revalidation and size limits |
 | Packages/SharedCore/Tests/SharedCoreTests/OddmouthGameTests.swift | Validation, secrecy, voting, scoring, repeat prevention |
 
 The XcodeGen target is **Oddmouth**, distinct from the five platform-template targets.
